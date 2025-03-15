@@ -9,6 +9,9 @@ dotenv.config();
 const app = express();
 app.use(bodyParser.json());
 
+// Serve static files from the public directory
+app.use(express.static('public'));
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
@@ -162,4 +165,5 @@ app.post('/chat', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Web interface available at http://localhost:${PORT}`);
 });
