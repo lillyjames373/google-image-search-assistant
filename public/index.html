@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Image Search Assistant</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #4285f4;
+        }
+        .chat-container {
+            height: 500px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #f5f5f5;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 18px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        .user-message {
+            background-color: #e2f3ff;
+            margin-left: auto;
+            border-bottom-right-radius: 5px;
+        }
+        .assistant-message {
+            background-color: #ffffff;
+            margin-right: auto;
+            border-bottom-left-radius: 5px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+        #message-input {
+            flex-grow: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            font-size: 16px;
+            outline: none;
+        }
+        #send-button {
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+        #send-button:hover {
+            background-color: #2b6ed9;
+        }
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
+        }
+        .image-item {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+        .image-item:hover {
+            transform: scale(1.02);
+        }
+        .image-item img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+        }
+        .image-info {
+            padding: 8px;
+            font-size: 12px;
+            background-color: #f9f9f9;
+        }
+        .image-title {
+            font-weight: bold;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 5px;
+        }
+        .image-source {
+            color: #666;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Google Image Search Assistant</h1>
+        <div id="chat-container" class="chat-container"></div>
+        <div class="input-area">
+            <input type="text" id="message-input" placeholder="Ask for images..." autofocus>
+            <button id="send-button">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // Maintain conversation thread
+        let threadId = null;
+        const chatContainer = document.getElementById('chat-container');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+
+        // Send message when send button is clicked
+        sendButton.addEventListener('click', sendMessage);
+        
+        // Send message when Enter key is pressed
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Function to send a message to the assistant
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            // Clear input field
+            messageInput.value = '';
+            
+            // Add user message to chat
+            addMessageToChat('user', message);
+            
+            // Show loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message assistant-message loading';
+            loadingDiv.textContent = 'Thinking...';
+            chatContainer.appendChild(loadingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            try {
+                // Send message to server
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ message, threadId })
+                });
+
+                // Remove loading indicator
+                chatContainer.removeChild(loadingDiv);
+
+                if (!response.ok) {
+                    throw new Error('Server error');
+                }
+
+                const data = await response.json();
+                
+                // Save thread ID for continuation
+                threadId = data.threadId;
+                
+                // Add assistant's response to chat
+                if (data.messages && data.messages.length > 0) {
+                    const assistantMessage = data.messages[0];
+                    if (assistantMessage.role === 'assistant') {
+                        processAssistantResponse(assistantMessage);
+                    }
+                }
+
+            } catch (error) {
+                // Remove loading indicator if still present
+                if (chatContainer.contains(loadingDiv)) {
+                    chatContainer.removeChild(loadingDiv);
+                }
+                
+                console.error('Error:', error);
+                
+                // Show error message
+                addMessageToChat('assistant', 'Sorry, there was an error processing your request.');
+            }
+        }
+
+        // Process the assistant's response and handle image results
+        function processAssistantResponse(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant-message';
+            
+            let imageResults = [];
+            
+            // Process content parts
+            message.content.forEach(content => {
+                if (content.type === 'text') {
+                    const value = content.text.value;
+                    
+                    // Try to extract image results from the text
+                    try {
+                        // Look for JSON data in the text
+                        const jsonMatch = value.match(/```json\n([\s\S]*?)\n```/) || 
+                                          value.match(/```([\s\S]*?)```/);
+                        
+                        if (jsonMatch) {
+                            const jsonData = JSON.parse(jsonMatch[1]);
+                            if (Array.isArray(jsonData) && jsonData.length > 0 && jsonData[0].link) {
+                                imageResults = jsonData;
+                            }
+                        }
+                    } catch (error) {
+                        console.log('No valid JSON data found in message');
+                    }
+                    
+                    // Add text content
+                    const textDiv = document.createElement('div');
+                    textDiv.innerHTML = formatMessageText(value);
+                    messageDiv.appendChild(textDiv);
+                }
+            });
+
+            // Add the message to chat
+            chatContainer.appendChild(messageDiv);
+            
+            // Add image grid if we have results
+            if (imageResults.length > 0) {
+                const imageGrid = createImageGrid(imageResults);
+                messageDiv.appendChild(imageGrid);
+            }
+            
+            // Scroll to bottom
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Format message text with basic markdown
+        function formatMessageText(text) {
+            // Remove JSON code blocks for cleaner display
+            text = text.replace(/```json\n[\s\S]*?\n```/g, '');
+            text = text.replace(/```[\s\S]*?```/g, '');
+            
+            // Convert line breaks to HTML
+            return text.replace(/\n/g, '<br>');
+        }
+
+        // Create an image grid for search results
+        function createImageGrid(images) {
+            const gridDiv = document.createElement('div');
+            gridDiv.className = 'image-grid';
+            
+            images.forEach(image => {
+                const imageItem = document.createElement('div');
+                imageItem.className = 'image-item';
+                
+                // Create link to original image
+                const link = document.createElement('a');
+                link.href = image.link;
+                link.target = '_blank';
+                
+                // Create thumbnail
+                const img = document.createElement('img');
+                img.src = image.thumbnail;
+                img.alt = image.title;
+                img.loading = 'lazy';
+                
+                // Create image info section
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'image-info';
+                
+                const titleDiv = document.createElement('div');
+                titleDiv.className = 'image-title';
+                titleDiv.textContent = image.title;
+                
+                const sourceDiv = document.createElement('div');
+                sourceDiv.className = 'image-source';
+                sourceDiv.textContent = image.source;
+                
+                // Assemble everything
+                infoDiv.appendChild(titleDiv);
+                infoDiv.appendChild(sourceDiv);
+                
+                link.appendChild(img);
+                imageItem.appendChild(link);
+                imageItem.appendChild(infoDiv);
+                
+                gridDiv.appendChild(imageItem);
+            });
+            
+            return gridDiv;
+        }
+
+        // Add a message to the chat UI
+        function addMessageToChat(role, content) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}-message`;
+            messageDiv.innerHTML = formatMessageText(content);
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Add welcome message when page loads
+        window.addEventListener('load', () => {
+            addMessageToChat('assistant', 'Hello! I can help you search for images. What would you like to see today?');
+        });
+    </script>
+</body>
+</html>
