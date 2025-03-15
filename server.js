@@ -87,3 +87,79 @@ async function handleToolCalls(toolCalls) {
   
   return toolResults;
 }
+
+// Routes
+app.post('/chat', async (req, res) => {
+  try {
+    const { message, threadId } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+    
+    const assistant = await getOrCreateAssistant();
+    
+    // Create or retrieve thread
+    let thread;
+    if (threadId) {
+      // Use existing thread
+      thread = { id: threadId };
+    } else {
+      // Create a new thread
+      thread = await openai.beta.threads.create();
+    }
+    
+    // Add user message to thread
+    await openai.beta.threads.messages.create(thread.id, {
+      role: 'user',
+      content: message
+    });
+    
+    // Run the assistant
+    const run = await openai.beta.threads.runs.create(thread.id, {
+      assistant_id: assistant.id
+    });
+    
+    // Poll for completion
+    let runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+    
+    while (runStatus.status !== 'completed' && 
+           runStatus.status !== 'failed' && 
+           runStatus.status !== 'cancelled') {
+      
+      // Handle tool calls if needed
+      if (runStatus.status === 'requires_action') {
+        const toolCalls = runStatus.required_action.submit_tool_outputs.tool_calls;
+        const toolOutputs = await handleToolCalls(toolCalls);
+        
+        // Submit the outputs back to the assistant
+        runStatus = await openai.beta.threads.runs.submitToolOutputs(thread.id, run.id, {
+          tool_outputs: toolOutputs
+        });
+      } else {
+        // Wait a bit before checking again
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        runStatus = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+      }
+    }
+    
+    // Get the latest messages
+    const messages = await openai.beta.threads.messages.list(thread.id);
+    
+    // Return the assistant's response and thread ID for continuation
+    return res.json({
+      threadId: thread.id,
+      messages: messages.data,
+      response: messages.data[0].content
+    });
+    
+  } catch (error) {
+    console.error('Error processing chat:', error);
+    res.status(500).json({ error: 'An error occurred processing your request' });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
